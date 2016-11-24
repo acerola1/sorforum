@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <title> - jsFiddle demo by acerola</title>
+  
+  <script type='text/javascript' src='https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js'></script>
+    
+      <script type='text/javascript' src="http://d3js.org/d3.v3.min.js"></script>
+    
+  
+  <style type='text/css'>
+    table.calc {
+    background-color: #EEE;
+    text-align: left;
+    border-spacing: 0px;
+    border: 1px solid #444;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    border-collapse: separate;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+table.calc td.separator {
+    text-align: center;
+    font-weight: bold;
+    color: #FFF;
+    background-color: #444;
+    padding: 4px;
+    border: 0px none;
+}
+
+.bar {
+    fill: #ff9f23;
+    fill-opacity:0.7;
+}
+
+.mask {
+    fill: lightgray;
+}
+.lhandle {
+    stroke: gray;
+}
+
+.rhandle {
+    stroke: gray;
+}
+.pot {
+    fill:steelblue;
+    stroke:gray;
+    stroke-width:6;
+}
+.axis text {
+    font: 10px sans-serif;
+}
+.axis path, .axis line {
+    fill: none;
+    stroke: #000;
+    shape-rendering: crispEdges;
+}
+.x.axis path {
+    display: none;
+}
+.tooltip {
+    line-height: 1;
+    font-weight: bold;
+    padding: 6px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    border-radius: 2px;
+    font: 10px sans-serif;
+}
+  </style>
+  
+
+
+<script type='text/javascript'>//<![CDATA[ 
+$(window).load(function(){
+// cefrézési és máslási kalkulátor BIAB-hoz
+// backlog: Üres adatokre nem jól működik a rajz
+
+var cookieNames = ["potsize", "grainweight", "mashratio", "txttargettemp", "txtgraintemp", "spargepotsize", "spargevolume", "boilpotsize"];
+
+var margin = {
+    top: 20,
+    right: 20,
+    bottom: 40,
+    left: 40
+},
+width = 500 - margin.left - margin.right,
+    height = 190 - margin.top - margin.bottom;
+
+var x = d3.scale.ordinal()
+    .rangeRoundBands([0, width], .20);
+
+var y = d3.scale.linear()
+    .range([height, 0]);
+
+var xAxis = d3.svg.axis()
+    .scale(x)
+    .orient("bottom")
+    .tickSize(0, 0);
+
+var yAxis = d3.svg.axis()
+    .scale(y)
+    .orient("left")
+    .ticks(5, " l");
+
+var svg = d3.select("body").select("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+var tooltip = d3.select(".tooltip");
+
+var data = [{
+    name: "Cefrézés",
+    volume: 1,
+    potsize: 20
+}, {
+    name: "Máslás",
+    volume: 6,
+    potsize: 10
+}, {
+    name: "Forralás",
+    volume: 17,
+    potsize: 19
+}];
+
+var sPot;
+var sMask;
+
+x.domain(data.map(function (d) {
+    return d.name;
+}));
+y.domain([0, d3.max(data, function (d) {
+    return d.potsize;
+})]);
+
+readFromCookies();
+updateMashSchedule();
+
+var gradient = svg.append("svg:defs")
+    .append("svg:linearGradient")
+    .attr("id", "gradient")
+    .attr("x1", "0%")
+    .attr("y1", "100%")
+    .attr("x2", "100%")
+    .attr("y2", "100%")
+    .attr("spreadMethod", "pad");
+ 
+gradient.append("svg:stop")
+    .attr("offset", "0%")
+    .attr("stop-color", "#777")
+    .attr("stop-opacity", 1);
+ 
+gradient.append("svg:stop")
+    .attr("offset", "25%")
+    .attr("stop-color", "#eee")
+    .attr("stop-opacity", 1);
+
+gradient.append("svg:stop")
+    .attr("offset", "75%")
+    .attr("stop-color", "#777")
+    .attr("stop-opacity", 1);
+
+gradient.append("svg:stop")
+    .attr("offset", "100%")
+    .attr("stop-color", "#999")
+    .attr("stop-opacity", 1);
+
+svg.append("g")
+    .attr("class", "x axis")
+    .attr("transform", "translate(0," + (height + 8) + ")")
+    .call(xAxis);
+
+svg.append("g")
+    .attr("class", "y axis")
+    .call(yAxis)
+    .append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("y", 6)
+    .attr("dy", ".71em")
+    .style("text-anchor", "end")
+    .text("Liter");
+
+svg.append("text")
+    .attr("x", width)
+    .attr("y", height + margin.top +20)
+    .text("© Ambruzs Péter")
+    .style("text-anchor", "end")
+    .style("font", "10px sans-serif");
+
+svg.selectAll(".bar")
+    .data(data)
+    .enter().append("rect")
+    .attr("class", "bar")
+    .attr("x", function (d) { return x(d.name) + 3;})
+    .attr("width", x.rangeBand() - 6)
+    .attr("y", function (d) { return height-2;})
+    .attr("height", 0)
+    .style("fill", function (d) {
+        return d.potsize < d.volume ? "red" : "#ff8d00";
+    })
+    .on("mouseover", function() { tooltip.style("display", null); })
+    .on("mousemove", function(d, i) {
+        var yPosition = d3.mouse(this)[1];
+        tooltip.select("#tt-value").text(d.volume + " liter");
+        tooltip.select("#tt-hint").text("Szükséges méret: ");
+        tooltip.transition()
+            .ease("elastic")
+            .style("left", (x(d.name)+ margin.left) + "px")
+            .style("top", (yPosition + margin.top - 20) + "px");
+    })
+    .transition()
+    .ease("bounce")
+    .duration(2000)
+    .delay( function (d, i) {
+        return i*300;
+    })
+    .attr("height", function (d) { return height - y(d.volume); })
+    .attr("y", function (d) { return y(d.volume)-2; });
+
+$("input").click(updateMashSchedule);
+
+function type(d) {
+    d.volume = +d.volume;
+    return d;
+}
+
+function updatePot() {
+    sPot = svg.selectAll(".pot")
+        .data(data);
+    sPot.enter().append("rect");
+    sPot.attr("class", "pot")
+        .attr("x", function (d) {
+        return x(d.name);
+    })
+        .attr("width", x.rangeBand())
+        .attr("rx",5)
+        .attr("ry",5)
+        .attr("height", function (d) {
+        return height - y(d.potsize);
+    })
+        .attr("y", function (d) {
+        return y(d.potsize);
+    });
+
+    sMask = svg.selectAll(".mask")
+        .data(data);
+
+    sMask.enter().append("rect");
+    sMask.attr("class", "mask")
+        .attr("x", function (d) {
+        return x(d.name)+1.5;
+    })
+        .attr("width", x.rangeBand()-3)
+        .attr("height", function (d) {
+        return height - y(d.potsize);
+    })
+        .attr("y", function (d) {
+        return y(d.potsize)-2;
+    })
+    .on("mouseover", function() { tooltip.style("display", null); })
+    .on("mousemove", function(d, i) {
+        var yPosition = d3.mouse(this)[1];
+        tooltip.select("#tt-value").text(d.potsize + " liter");
+        tooltip.select("#tt-hint").text("Edény mérete: ");
+        tooltip.transition()
+            .ease("elastic")
+            .style("left", (x(d.name)+ margin.left) + "px")
+            .style("top", (yPosition + margin.top - 20) + "px");
+    })
+    .style("fill", "url(#gradient)");
+    
+    var lHandle = svg.selectAll(".lhandle")
+        .data(data);
+    lHandle.enter().append("line");  
+    lHandle.attr("class", "lhandle")
+        .attr("x1", function (d) {
+        return x(d.name);
+    })
+        .attr("x2", function (d) {
+        return x(d.name)-10;
+    })
+        .attr("y1", function (d) {
+        return y(d.potsize) + 0.3*(height - y(d.potsize));
+    })
+        .attr("y2", function (d) {
+        return y(d.potsize) + 0.3*(height - y(d.potsize))-10;
+    })
+    .style("stroke-width", 5);
+    
+    var rHandle = svg.selectAll(".rhandle")
+        .data(data);
+    rHandle.enter().append("line");  
+    rHandle.attr("class", "rhandle")
+        .attr("x1", function (d) {
+        return x(d.name)+x.rangeBand();
+    })
+        .attr("x2", function (d) {
+        return x(d.name)+x.rangeBand()+10;
+    })
+        .attr("y1", function (d) {
+        return y(d.potsize) + 0.3*(height - y(d.potsize));
+    })
+        .attr("y2", function (d) {
+        return y(d.potsize) + 0.3*(height - y(d.potsize))-10;
+    })
+    .style("stroke-width", 5);
+}
+
+function updateBar() {
+
+    svg.selectAll(".bar")
+        .data(data)
+        .transition()
+        .ease("bounce")
+        .duration(2000)
+        .attr("height", function (d) {
+        return height - y(d.volume);
+    })
+        .attr("y", function (d) { return y(d.volume)-2;})
+        .style("fill", function (d) {
+        return d.potsize < d.volume ? "red" : "#ff8d00"
+    });
+
+    svg.selectAll("g .y.axis")
+        .call(yAxis);
+}
+
+$(".mashButton").click(updateMashSchedule);
+$(".spargeButton").click(updateSpargeSchedule);
+
+function getPotSize() {
+    return new Number ($("#potsize").val());
+}
+
+function getSpargePotSize() {
+    return new Number ($("#spargepotsize").val());
+}
+
+function getBoilPotSize() {
+    return new Number ($("#boilpotsize").val());
+}
+
+function updateMashSchedule() {
+    var grainweight = new Number ($("#grainweight").val());
+    var ratio = new Number ($("#mashratio").val());
+    $("#divstrikevolume").text((ratio*grainweight).toFixed(1)+ " liter");
+    var targetTemp = new Number ($("#txttargettemp").val());
+    var grainTemp = new Number ($("#txtgraintemp").val());
+    var striketemp = new Number((0.41/ratio)*(targetTemp-grainTemp)+targetTemp);
+ 	$("#divstriketemp").text(striketemp.toFixed(1)+" C");
+    var reqMashPotSize = ratio*grainweight+0.7*grainweight;
+    $("#divrequiredpotsize").text((reqMashPotSize).toFixed(1)+ " liter");
+    $("#divrequiredpotsize").attr("value", (reqMashPotSize).toFixed(1));    
+    var potsize =  getPotSize();
+    var color = (potsize < reqMashPotSize) ? "red" : "black";
+    $("#divrequiredpotsize").css('color', color);
+    
+    var wortToBoil = (ratio*grainweight) - (grainweight*1.05);
+    $("#divworttoboil").text(wortToBoil.toFixed(1)+" liter");
+    $("#divworttoboil").attr("value", (wortToBoil).toFixed(1));    
+
+    updateSpargeSchedule()    
+ }
+
+function updateSpargeSchedule() {
+    var spargeWaterVolume = new Number ($("#spargevolume").val());
+    var grainweight = new Number ($("#grainweight").val());
+    var reqSpargePotSize = 1.75*grainweight + spargeWaterVolume;
+    $("#divrequiredspargepotsize").text((reqSpargePotSize).toFixed(1)+" liter");
+    $("#divrequiredspargepotsize").attr("value", (reqSpargePotSize).toFixed(1));  
+    var spargePotsize =  getSpargePotSize();
+    var color = (spargePotsize < reqSpargePotSize) ? "red" : "black";
+    $("#divrequiredspargepotsize").css('color', color);
+    
+    $("#divspargeworttoboil").text(spargeWaterVolume.toFixed(1)+" liter");
+    // boil data
+    var preBoilVolume = spargeWaterVolume + new Number ($("#divworttoboil").attr("value"));
+    $("#divrequiredboilpotsize").text(" liter");
+    $("#divrequiredboilpotsize").text((preBoilVolume).toFixed(1)+" liter");
+    $("#divrequiredboilpotsize").attr("value", (preBoilVolume).toFixed(1));
+    
+    updatePotVolume();
+    writeToCookies();
+}
+
+function updatePotVolume() {
+    updatePotData();
+    y.domain([0, d3.max(data, function (d) {
+        return d.potsize;
+    })]);
+
+    updateBar();
+    updatePot();
+    tooltip.style("display", "none");
+}
+
+function updatePotData() {
+    data[0].potsize = getPotSize();
+    data[0].volume = $("#divrequiredpotsize").attr("value");
+    data[1].potsize = getSpargePotSize();
+    data[1].volume = $("#divrequiredspargepotsize").attr("value");
+    data[2].potsize = getBoilPotSize();
+    data[2].volume = $("#divrequiredboilpotsize").attr("value");    
+}
+
+// cookie handling
+function writeToCookies() {
+    var days = 365;
+    cookieNames.forEach(function(name) {
+        createCookie(name, $("#"+name).val(), days);
+    });
+}
+
+function readFromCookies() {
+    cookieNames.forEach(function(name) {
+        var value = readCookie(name);
+        if (value) {
+            $("#"+name).val(value);
+        }
+    });
+}
+
+function createCookie(name, value, days) {
+    var expires;
+
+    if (days) {
+        var date = new Date();
+        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+        expires = "; expires=" + date.toGMTString();
+    } else {
+        expires = "";
+    }
+    document.cookie = escape(name) + "=" + escape(value) + expires + "; path=/";
+}
+
+function readCookie(name) {
+    var nameEQ = escape(name) + "=";
+    var ca = document.cookie.split(';');
+    for (var i = 0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+        if (c.indexOf(nameEQ) === 0) return unescape(c.substring(nameEQ.length, c.length));
+    }
+    return null;
+}
+
+function eraseCookie(name) {
+    createCookie(name, "", -1);
+}
+});//]]>  
+
+</script>
+
+
+</head>
+<body>
+  <p>
+    <svg></svg>
+</p>
+<table class="calc" height="309" width="400">
+<tbody>
+<tr>
+<td class="separator" colspan="2">Cefrézési kalkulátor:</td>
+</tr>
+<tr>
+<td>Cefréző edény mérete</td>
+<td><input id="potsize" name="potsize" value="19" maxlength="6" style="width: 60px;" onchange="javascript: updateMashSchedule();" type="text" /> <span class="grainweightunit">liter</span></td>
+</tr>
+<tr>
+<td>Maláta tömege:</td>
+<td><input id="grainweight" value="4" maxlength="6" style="width: 60px;" onchange="javascript: updateMashSchedule();" type="text" /> <span class="grainweightunit">kg</span></td>
+</tr>
+<tr>
+<td>Víz / maláta arány:</td>
+<td><input id="mashratio" value="2.5" maxlength="6" style="width: 60px;" onchange="javascript: updateMashSchedule();" type="text" /> liter <span class="mashratiounit">/ kg<br /></span></td>
+</tr>
+<tr>
+<td>Cefrézési hőmérséklet:</td>
+<td><input id="txttargettemp" value="65" maxlength="6" style="width: 60px;" onchange="javascript: updateMashSchedule();" type="text" /> <span class="tempunit">C</span></td>
+</tr>
+<tr>
+<td>Maláta hőmérséklet:</td>
+<td><input id="txtgraintemp" value="25" maxlength="6" style="width: 60px;" onchange="javascript: updateMashSchedule();" type="text" /> <span class="tempunit">C</span></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td> </td>
+<td><input class="mashButton" name="update" value="Számol" onclick="updateMashSchedule()" type="button" /><br /><br /></td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px">Cefréző víz mennyisége:</td>
+<td>
+<div id="divstrikevolume" class="calcinfo" style="vertical-align: bottom; font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Cefréző víz hőmérséklete:</td>
+<td>
+<div id="divstriketemp" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Edényben elfoglalt hely:</td>
+<td>
+<div id="divrequiredpotsize" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Szűrés utáni mennyiség:</td>
+<td>
+<div id="divworttoboil" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+</tbody>
+</table>
+<table class="calc" height="150" width="400">
+<tbody>
+<tr>
+<td class="separator" colspan="2">Máslási kalkulátor:</td>
+</tr>
+<tr>
+<td>Másló edény mérete</td>
+<td><input id="spargepotsize" name="potsize" value="20" maxlength="6" style="width: 60px;" onchange="javascript: updateSpargeSchedule();" type="text" /> <span class="grainweightunit">liter</span></td>
+</tr>
+<tr>
+<td>Másló víz:</td>
+<td><input id="spargevolume" value="10" maxlength="6" style="width: 60px;" onchange="javascript: updateSpargeSchedule();" type="text" /> liter</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td> </td>
+<td><input class="spargeButton" name="update" value="Számol" onclick="updateSpargeSchedule()" type="button" /><br /><br /></td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Edényben elfoglalt hely:</td>
+<td>
+<div id="divrequiredspargepotsize" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Máslás utáni mennyiség:</td>
+<td>
+<div id="divspargeworttoboil" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+<table class="calc" height="50" width="400">
+<tbody>
+<tr>
+<td class="separator" colspan="2">Forralás:</td>
+</tr>
+<tr>
+<td>Forraló edény mérete</td>
+<td><input id="boilpotsize" name="potsize" value="19" maxlength="6" style="width: 60px;" onchange="javascript: updateSpargeSchedule();" type="text" /> <span class="grainweightunit">liter</span></td>
+</tr>
+<tr>
+<td style="vertical-align: bottom; padding-bottom:10px;">Forralás előtti mennyiség:</td>
+<td>
+<div id="divrequiredboilpotsize" class="calcinfo" style="font-size: 14pt; height: 25px; padding-bottom: 5px;"></div>
+</td>
+</tr>
+</tbody>
+</table>
+
+<div class="tooltip" style="position: absolute; opacity: 0.9; pointer-events: all; display:none;"><span id="tt-hint" style="color:lightgray">Edényben elfoglalt hely:</span> <strong id="tt-value" style="color:white">0.05987</strong></div>
+  
+</body>
+
+
+</html>
+
